@@ -30,6 +30,8 @@ ExcludeArch: i686
 %global build_with_asan   0
 %global test_on_wayland   0
 
+%global toolchain clang
+
 %if "%{toolchain}" == "clang"
 %global build_with_clang 1
 %else
