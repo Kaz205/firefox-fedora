@@ -679,7 +679,7 @@ chmod a-x third_party/rust/ash/src/extensions/nv/*.rs
 %undefine _auto_set_build_flags
 # Disable LTO to work around rhbz#1883904
 # Is that already fixed?
-%define _lto_cflags %{nil}
+#%define _lto_cflags %{nil}
 
 %if 0%{?use_bundled_cbindgen}
 mkdir -p my_rust_vendor
