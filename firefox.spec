@@ -778,11 +778,7 @@ export CCACHE_DISABLE=1
 export GCOV_PREFIX=`pwd -P`/objdir
 export GCOV_PREFIX_STRIP=$(( $(echo `pwd -P`|tr -c -d '/' |wc -c )+2 ))
 env | grep GCOV
-%if %{build_with_clang}
-echo "ac_add_options --enable-lto=cross" >> .mozconfig
-echo "ac_add_options MOZ_PGO=1" >> .mozconfig
-echo "ac_add_options MOZ_PGO_RUST=1" >> .mozconfig
-%else
+%if !%{build_with_clang}
 echo "ac_add_options --enable-lto" >> .mozconfig
 echo "ac_add_options MOZ_PGO=1" >> .mozconfig
 %endif
@@ -812,12 +808,21 @@ tar xf %{SOURCE37}
 sed -i -e 's|#!/usr/bin/env python3|#!/usr/bin/env python3.11|' mach
 
 %if %{build_with_pgo}
-%if %{test_on_wayland}
-env | grep "WAYLAND"
-MOZ_ENABLE_WAYLAND=1 ./mach build  -v 2>&1 | cat - || exit 1
-%else
-xvfb-run ./mach build -v 2>&1 | cat - || exit 1
-%endif
+echo "ac_add_options --enable-profile-generate=cross" >> .mozconfig
+./mach build -v 2>&1 | cat - || exit 1
+./mach package
+LLVM_PROFDATA=llvm-profdata \
+    JARLOG_FILE="$PWD/jarlog" \
+    xvfb-run -s "-screen 0 1920x1080x24 -nolisten local" \
+    ./mach python build/pgo/profileserver.py
+
+./mach clobber
+sed -i "/enable-profile-generate/d" .mozconfig
+echo "ac_add_options --enable-lto=cross" >> .mozconfig
+echo "ac_add_options --enable-profile-use=cross" >> .mozconfig
+echo "ac_add_options --with-pgo-profile-path=${PWD@Q}/merged.profdata" >> .mozconfig
+echo "ac_add_options --with-pgo-jarlog=${PWD@Q}/jarlog" >> .mozconfig
+./mach build -v 2>&1 | cat - || exit 1
 %else
 ./mach build -v 2>&1 | cat - || exit 1
 %endif
