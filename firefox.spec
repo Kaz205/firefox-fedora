@@ -242,6 +242,7 @@ Patch215:        firefox-enable-addons.patch
 Patch219:        rhbz-1173156.patch
 #ARM run-time patch
 Patch226:        rhbz-1354671.patch
+Patch228:        disable-openh264-download.patch
 Patch229:        firefox-nss-addon-hack.patch
 Patch230:        firefox-enable-vaapi.patch
 Patch231:        fedora-customization.patch
@@ -336,6 +337,7 @@ BuildRequires:  icu
 %endif
 
 Requires:       mozilla-filesystem
+Recommends:     mozilla-openh264 >= 2.1.1
 %if %{with langpacks_subpkg}
 Recommends:     firefox-langpacks = %{version}-%{release}
 %else
@@ -538,6 +540,7 @@ This package contains results of tests executed during build.
 %ifarch aarch64
 %patch226 -p1 -b .1354671
 %endif
+%patch228 -p1 -b .disable-openh264-download
 %patch229 -p1 -b .firefox-nss-addon-hack
 %patch230 -p1 -b .firefox-enable-vaapi
 %patch231 -p1 -b .fedora-customization
