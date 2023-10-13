@@ -15,7 +15,7 @@ ExcludeArch: i686
 
 # Don't create debuginfo rpm packages. It reduces build time as
 # exctracting debuginfo takes long time.
-%global create_debuginfo  1
+%global create_debuginfo  0
 
 # Produce debug (non-optimized) package build. Suitable for debugging only
 # as the build is *very* slow.
@@ -78,10 +78,8 @@ ExcludeArch: i686
 # Build PGO+LTO on x86_64 only due to build issues
 # on other arches.
 %global build_with_pgo    0
-%ifarch x86_64
 %if %{release_build}
 %global build_with_pgo    1
-%endif
 %endif
 %if 0%{?flatpak}
 %global build_with_pgo    0
@@ -167,7 +165,6 @@ ExcludeArch: i686
 %global __provides_exclude_from ^%{mozappdir}
 %global __requires_exclude ^(%%(find %{buildroot}%{mozappdir} -name '*.so' | xargs -n1 basename | sort -u | paste -s -d '|' -))
 
-%undefine _package_note_flags
 # for https://bugzilla.redhat.com/show_bug.cgi?id=2184553
 %global _package_note_status 0
 
@@ -318,6 +315,8 @@ BuildRequires:  llvm
 BuildRequires:  llvm-devel
 BuildRequires:  clang
 BuildRequires:  clang-libs
+BuildRequires:  clang-resource-filesystem
+BuildRequires:  compiler-rt
 %if %{build_with_clang}
 BuildRequires:  lld
 %endif
@@ -605,21 +604,8 @@ echo "ac_add_options --disable-webrtc" >> .mozconfig
 echo "ac_add_options --enable-debug" >> .mozconfig
 echo "ac_add_options --disable-optimize" >> .mozconfig
 %else
-%global optimize_flags "none"
-%ifarch ppc64le aarch64
-%global optimize_flags "-g -O2"
-%endif
-%if %{optimize_flags} != "none"
-echo 'ac_add_options --enable-optimize=%{?optimize_flags}' >> .mozconfig
-%else
 echo 'ac_add_options --enable-optimize' >> .mozconfig
-%endif
 echo "ac_add_options --disable-debug" >> .mozconfig
-%endif
-
-# Second arches fail to start with jemalloc enabled
-%ifnarch %{ix86} x86_64
-echo "ac_add_options --disable-jemalloc" >> .mozconfig
 %endif
 
 %if !%{enable_mozilla_crashreporter}
@@ -691,6 +677,7 @@ chmod a-x third_party/rust/ash/src/extensions/nv/*.rs
 #---------------------------------------------------------------------
 
 %build
+%undefine _auto_set_build_flags
 # Disable LTO to work around rhbz#1883904
 # Is that already fixed?
 %define _lto_cflags %{nil}
@@ -740,7 +727,6 @@ cp %{SOURCE32} %{_buildrootdir}/bin || :
 # Do not update config.guess in the ./third_party/rust because that would break checksums
 find ./ -path ./third_party/rust -prune -o -name config.guess -exec cp /usr/lib/rpm/config.guess {} ';'
 
-MOZ_OPT_FLAGS=$(echo "%{optflags}" | sed -e 's/-Wall//')
 #rhbz#1037063
 # -Werror=format-security causes build failures when -Wno-format is explicitly given
 # for some sources
@@ -753,27 +739,10 @@ MOZ_OPT_FLAGS="$MOZ_OPT_FLAGS -fpermissive"
 %if %{?debug_build}
 MOZ_OPT_FLAGS=$(echo "$MOZ_OPT_FLAGS" | sed -e 's/-O2//')
 %endif
-# If MOZ_DEBUG_FLAGS is empty, firefox's build will default it to "-g" which
-# overrides the -g1 from line above and breaks building on s390/arm
-# (OOM when linking, rhbz#1238225)
-%ifarch %{ix86}
 MOZ_OPT_FLAGS=$(echo "$MOZ_OPT_FLAGS" | sed -e 's/-g/-g0/')
-%else
-# this reduces backtrace quality substantially, but seems to be needed
-# to prevent various OOM conditions during build
-# https://bugzilla.redhat.com/show_bug.cgi?id=2241690
-MOZ_OPT_FLAGS=$(echo "$MOZ_OPT_FLAGS" | sed -e 's/-g/-g1/')
-%endif
 export MOZ_DEBUG_FLAGS=" "
 MOZ_LINK_FLAGS="%{build_ldflags}"
-%if !%{build_with_clang}
-%ifarch aarch64 %{ix86}
-MOZ_LINK_FLAGS="$MOZ_LINK_FLAGS -Wl,--no-keep-memory -Wl,--reduce-memory-overheads"
-%endif
-%endif
-%ifarch %{ix86} s390x
-export RUSTFLAGS="-Cdebuginfo=0"
-%endif
+export RUSTFLAGS="-Cdebuginfo=0 -Ctarget-cpu=apple-m1"
 %if %{build_with_asan}
 MOZ_OPT_FLAGS="$MOZ_OPT_FLAGS -fsanitize=address -Dxmalloc=myxmalloc"
 MOZ_LINK_FLAGS="$MOZ_LINK_FLAGS -fsanitize=address -ldl"
@@ -781,6 +750,11 @@ MOZ_LINK_FLAGS="$MOZ_LINK_FLAGS -fsanitize=address -ldl"
 
 # We don't wantfirefox to use CK_GCM_PARAMS_V3 in nss
 MOZ_OPT_FLAGS="$MOZ_OPT_FLAGS -DNSS_PKCS11_3_0_STRICT"
+
+%if %{build_with_clang}
+MOZ_OPT_FLAGS="$MOZ_OPT_FLAGS -mcpu=apple-m1"
+MOZ_LINK_FLAGS="$MOZ_LINK_FLAGS -Wl,--thinlto-jobs=$(nproc --all)"
+%endif
 
 echo "export CFLAGS=\"$MOZ_OPT_FLAGS\"" >> .mozconfig
 echo "export CXXFLAGS=\"$MOZ_OPT_FLAGS\"" >> .mozconfig
@@ -805,13 +779,19 @@ export CCACHE_DISABLE=1
 export GCOV_PREFIX=`pwd -P`/objdir
 export GCOV_PREFIX_STRIP=$(( $(echo `pwd -P`|tr -c -d '/' |wc -c )+2 ))
 env | grep GCOV
+%if %{build_with_clang}
+echo "ac_add_options --enable-lto=cross" >> .mozconfig
+echo "ac_add_options MOZ_PGO=1" >> .mozconfig
+echo "ac_add_options MOZ_PGO_RUST=1" >> .mozconfig
+%else
 echo "ac_add_options --enable-lto" >> .mozconfig
 echo "ac_add_options MOZ_PGO=1" >> .mozconfig
+%endif
 %endif
 
 # Require 4 GB of RAM per CPU core
 %constrain_build -m 4096
-echo "mk_add_options MOZ_MAKE_FLAGS=\"-j%{_smp_build_ncpus}\"" >> .mozconfig
+echo "mk_add_options MOZ_MAKE_FLAGS=\"-j$(nproc --all)\"" >> .mozconfig
 
 echo "mk_add_options MOZ_SERVICES_SYNC=1" >> .mozconfig
 echo "export STRIP=/bin/true" >> .mozconfig
@@ -845,6 +825,7 @@ xvfb-run ./mach build -v 2>&1 | cat - || exit 1
 
 #---------------------------------------------------------------------
 %install
+%undefine _auto_set_build_flags
 # run Firefox test suite
 # Do we need it?
 # export MACH_NATIVE_PACKAGE_SOURCE=system
@@ -1074,6 +1055,7 @@ if (posix.stat("%{mozappdir}/browser/defaults/preferences", "type") == "link") t
 end
 
 %check
+%undefine _auto_set_build_flags
 appstream-util validate-relax --nonet %{buildroot}%{_datadir}/metainfo/*.appdata.xml
 
 %preun
