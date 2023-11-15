@@ -376,6 +376,7 @@ BuildRequires:  xorg-x11-server-Xvfb
 %endif
 BuildRequires:  rust
 BuildRequires:  cargo
+BuildRequires:  rustfmt
 BuildRequires:  clang-devel
 %if %{build_with_asan}
 BuildRequires:  libasan
